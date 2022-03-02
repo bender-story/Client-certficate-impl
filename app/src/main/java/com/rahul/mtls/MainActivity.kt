@@ -1,5 +1,6 @@
 package com.rahul.mtls
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
@@ -29,6 +30,9 @@ import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.*
+import android.preference.PreferenceManager
+
+import android.content.SharedPreferences
 
 
 class MainActivity : AppCompatActivity() {
@@ -37,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     var buttonHttpCallWithCert: Button? = null
     var buttonHttpCallNoCert: Button? = null
     var webView: WebView? = null
+    private val certInstalledStatus = "certInstalledStatus"
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -51,8 +56,10 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
 //        addCert()
         buttonInAppBrowser?.setOnClickListener {
-            if(isCertificateInstalled("C=US,ST=California,L=San Francisco,O=BadSSL,CN=BadSSL Client Root Certificate Authority")) openBrowser()
-           else addCertInKeyStore()
+//            if(isCertificateInstalled("C=US,ST=California,L=San Francisco,O=BadSSL,CN=BadSSL Client Root Certificate Authority")) openBrowser()
+//           else addCertInKeyStore()
+
+            if (isCertificateInstalled()) openBrowser() else addCertInKeyStore()
 
         }
 
@@ -75,50 +82,73 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openBrowser(){
-                    val customTab = CustomTabsIntent.Builder().build()
-            val intent = customTab.intent
-            intent.data = Uri.parse("https://client.badssl.com")
-            customTab.intent.data?.let { it -> customTab.launchUrl(this, it) }
+    private fun openBrowser() {
+        val customTab = CustomTabsIntent.Builder().build()
+        val intent = customTab.intent
+        intent.data = Uri.parse("https://client.badssl.com")
+        customTab.intent.data?.let { it -> customTab.launchUrl(this, it) }
     }
 
-    private fun addCertInKeyStore(){
+    private fun addCertInKeyStore() {
 //        val keyStore: KeyStore = KeyStore.getInstance("PKCS12", "BC")
         val inputStream: InputStream = resources.openRawResource(R.raw.client)
         val intent = KeyChain.createInstallIntent()
         val p12: ByteArray = inputStream.readBytes()
         intent.putExtra(KeyChain.EXTRA_PKCS12, p12)
         intent.putExtra(KeyChain.EXTRA_NAME, "Sample cert")
-        startActivityForResult(intent,3)
+        startActivityForResult(intent, 3)
     }
-//    private fun addCertInKeyStore2(){
-//        val keyStore: KeyStore = KeyStore.getInstance("PKCS12")
-//        val inputStream: InputStream = resources.openRawResource(R.raw.client)
-//        inputStream.use { it ->
-//            keyStore.load(it, "badssl.com".toCharArray())
-//        }
-//        val aliases = keyStore.aliases()
-//        var cert:X509Certificate? = null
-//        while (aliases.hasMoreElements()) {
-//            val alias = aliases.nextElement()
-//             cert = keyStore.getCertificate(alias) as X509Certificate
-//            Log.d(
-//                "cert -->", "Subject DN: " +
-//                        cert.getSubjectDN().getName()
-//            )
-//            Log.d(
-//                "cert -->", "Issuer DN: " +
-//                        cert.getIssuerDN().getName()
-//            )
-//        }
-//
-//
-//        val intent = KeyChain.createInstallIntent()
-////        val p12: ByteArray = inputStream.readBytes()
-//        intent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert?.encoded)
-//        intent.putExtra(KeyChain.EXTRA_NAME, "Sample cert")
-//        startActivityForResult(intent,3)
-//    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+
+        if (requestCode == 3 && resultCode == RESULT_OK) {
+            openBrowser()
+            certAddedSuccessfully()
+        } else super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    private fun isCertificateInstalled() =
+        getPreferences(Context.MODE_PRIVATE).getBoolean(certInstalledStatus, false)
+
+    private fun certAddedSuccessfully() {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE) ?: return
+        with(sharedPref.edit()) {
+            putBoolean(certInstalledStatus, true)
+            apply()
+        }
+    }
+
+    /// This code was not able to fetch user credentials certificates for that reason
+    // had to settle with the shared prefernece
+    private fun isCertificateInstalled(issuerDn: String): Boolean {
+        try {
+            val ks = KeyStore.getInstance("AndroidCAStore")
+            if (ks != null) {
+                ks.load(null, null)
+                val aliases = ks.aliases()
+                while (aliases.hasMoreElements()) {
+                    val alias = aliases.nextElement() as String
+                    val cert = ks.getCertificate(alias) as X509Certificate
+                    Log.d("Cert ---->", cert.issuerDN.name)
+                    if (cert.issuerDN.name.contains(issuerDn)) {
+                        return true
+                    }
+                }
+            }
+        } catch (e: IOException) {
+            e.printStackTrace()
+        } catch (e: KeyStoreException) {
+            e.printStackTrace()
+        } catch (e: NoSuchAlgorithmException) {
+            e.printStackTrace()
+        } catch (e: CertificateException) {
+            e.printStackTrace()
+        }
+        return false
+    }
+
+
+//    Http Calls --------->
 
     private fun getClientCertData(): SSLContext? {
         val keyStore: KeyStore = KeyStore.getInstance("PKCS12", "BC")
@@ -136,14 +166,14 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun getHTTPData(cert:Boolean = true) {
+    private fun getHTTPData(cert: Boolean = true) {
         var result: String? = null
         var urlConnection: HttpURLConnection? = null
         try {
             val requestedUrl = URL("https://client.badssl.com")
             urlConnection = requestedUrl.openConnection() as HttpURLConnection
             if (urlConnection is HttpsURLConnection) {
-              if(cert)  urlConnection.sslSocketFactory = getClientCertData()?.socketFactory
+                if (cert) urlConnection.sslSocketFactory = getClientCertData()?.socketFactory
             }
             urlConnection.requestMethod = "GET"
             urlConnection.connectTimeout = 1500
@@ -157,7 +187,7 @@ class MainActivity : AppCompatActivity() {
             urlConnection?.disconnect()
         }
 
-        loadHTML(result?:"")
+        loadHTML(result ?: "")
     }
 
     private fun loadHTML(result: String) {
@@ -166,99 +196,6 @@ class MainActivity : AppCompatActivity() {
             webView?.loadData(result, "text/html", "UTF-8");
         }
     }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-
-        if(requestCode == 3 && resultCode == RESULT_OK){
-            openBrowser()
-        } else  super.onActivityResult(requestCode, resultCode, data)
-    }
-
-    private fun isCertificateInstalled(issuerDn: String): Boolean {
-            try {
-                val ks = KeyStore.getInstance("AndroidCAStore")
-                if (ks != null) {
-                    ks.load(null, null)
-                    val aliases = ks.aliases()
-                    while (aliases.hasMoreElements()) {
-                        val alias = aliases.nextElement() as String
-                        val cert = ks.getCertificate(alias) as X509Certificate
-                        Log.d("Cert ---->",cert.issuerDN.name)
-                        if (cert.issuerDN.name.contains(issuerDn)) {
-                            return true
-                        }
-                    }
-                }
-            } catch (e: IOException) {
-                e.printStackTrace()
-            } catch (e: KeyStoreException) {
-                e.printStackTrace()
-            } catch (e: NoSuchAlgorithmException) {
-                e.printStackTrace()
-            } catch (e: CertificateException) {
-                e.printStackTrace()
-            }
-            return false
-    }
-
-//    private fun addCert() {
-//        val keyStore: KeyStore = KeyStore.getInstance("PKCS12", "BC")
-//        val inputStream: InputStream = resources.openRawResource(R.raw.client)
-//        inputStream.use { it ->
-//            keyStore.load(it, "badssl.com".toCharArray())
-//        }
-////        val reader = BufferedReader(inputStream.reader())
-//
-//        val kmf: KeyManagerFactory = KeyManagerFactory.getInstance("X509") //x509
-//
-//
-////        val content = StringBuilder()
-////        try {
-////            var line = reader.readLine()
-////            while (line != null) {
-////                content.append(line)
-////                line = reader.readLine()
-////            }
-////        } finally {
-////            reader.close()
-////        }
-////        val sb = StringBuilder()
-////        var ch: Int
-////            while (inputStream.read().also { ch = it } != -1) {
-////                sb.append(ch.toChar())
-////            }
-//
-//        kmf.init(keyStore, "badssl.com".toCharArray())
-//
-//        val sslContext = SSLContext.getInstance("TLSv1.2") //TLSv1.2
-//
-//        sslContext.init(kmf.keyManagers, null, null)
-//
-//        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
-////        SslCertificateAuthority.setCustomCertificateAuthority(inputStream)
-////        val defaultCAs: KeyStore = KeyStore.getInstance("AndroidCAStore")
-////        if (defaultCAs != null) {
-////            defaultCAs.load(null, null)
-////            val keyAliases: Enumeration<String> = defaultCAs.aliases()
-////            while (keyAliases.hasMoreElements()) {
-////                val alias: String = keyAliases.nextElement()
-////                val cert: Certificate = defaultCAs.getCertificate(alias)
-////                try {
-////                    if (!keyStore.containsAlias(alias)) keyStore.setCertificateEntry(alias, cert)
-////                } catch (e: Exception) {
-////                    println("Error adding $e")
-////                }
-////            }
-////        }
-////        val tmf: TrustManagerFactory =
-////            TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-////        tmf.init(keyStore)
-////// Get a new SSL context
-////// Get a new SSL context
-////        val ctx: SSLContext = SSLContext.getInstance("SSL")
-////        ctx.init(null, tmf.getTrustManagers(), SecureRandom())
-////        return ctx.getSocketFactory()
-//    }
 
 
 }
