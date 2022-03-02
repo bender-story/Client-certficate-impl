@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="true">client.badssl.com/</domain>
+        <trust-anchors>
+            <certificates src="@raw/client">
+            </certificates>
+            <pin-set>
+                <pin digest="SHA-256">YmFkc3NsLmNvbQ==</pin>
+            </pin-set>
+
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
